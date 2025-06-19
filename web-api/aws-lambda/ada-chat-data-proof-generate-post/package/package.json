@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "axios": "^1.7.9",
+    "jose": "^4.15.9",
+    "jsonwebtoken": "^9.0.2",
+    "md5": "^2.3.0",
+    "merkletreejs": "^0.4.0",
+    "openai": "^4.78.0",
+    "snarkjs": "^0.7.5",
+    "ulid": "^2.3.0"
+  }
+}

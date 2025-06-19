@@ -1,0 +1,9 @@
+application/.aws-sam
+**/node_modules
+#template.yaml
+**/.env
+**/venv
+**/dist
+**/out
+**/.DS_Store
+.DS_Store
