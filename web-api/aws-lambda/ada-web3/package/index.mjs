@@ -138,21 +138,23 @@ async function MintSuperchatNFT(toAddress, metadata, isTest) {
 async function MintChatdataNFT(toAddress, metadata, isTest) {
     console.log("MintChatdataNFT", toAddress, metadata, isTest);
 
-    // ignore toAddress, chat data will always mint to our wallet, as we need to update (burn and re-mint) it from time to time
-    let adminAddr = await wallet.getChangeAddress();
-    console.log("adminAddr", adminAddr);
-    let result = await MintNFT(adminAddr, metadata, isTest);
+    // // ignore toAddress, chat data will always mint to our wallet, as we need to update (burn and re-mint) it from time to time
+    // let adminAddr = await wallet.getChangeAddress();
+    // console.log("adminAddr", adminAddr);
+    // let result = await MintNFT(adminAddr, metadata, isTest);
+
+    let result = await MintNFT(toAddress, metadata, isTest);
     return result;
 }
 
-// burn and re-mint
+// burn and re-mint reference NFT (which under our ownership) to update metadata
 async function UpdateChatDataMetadata(unit, toAddress, metadata, isTest) {
     console.log("UpdateChatDataMetadata", toAddress, metadata, isTest);
 
     let burnResult = await BurnNFT(unit, isTest);
     console.log("burnResult", burnResult);
 
-    // ignore toAddress, chat data will always mint to our wallet, as we need to update (burn and re-mint) it from time to time
+    // ignore toAddress, reference nft will always mint to our wallet, as we need to update (burn and re-mint) it from time to time
     let adminAddr = await wallet.getChangeAddress();
     console.log("adminAddr", adminAddr);
     let mintResult = await MintNFT(adminAddr, metadata, isTest);
@@ -161,10 +163,13 @@ async function UpdateChatDataMetadata(unit, toAddress, metadata, isTest) {
     return mintResult;
 }
 
+// CIP-68
 async function MintNFT(toAddress, metadata, isTest) {
     let _metadata = metadata;
     let wallet = isTest ? adminCardanoWalletTest : adminCardanoWallet;
-
+    let adminAddr = await wallet.getChangeAddress();
+    console.log("adminAddr", adminAddr);
+    
     if(typeof _metadata !== 'object') {
         _metadata = JSON.parse(_metadata);
     }
@@ -176,39 +181,64 @@ async function MintNFT(toAddress, metadata, isTest) {
     if(!_metadata.attributes) {
         _metadata.attributes = [];
     }
-    _metadata.attributes.push({
-                    "trait_type": "SIGNATURE",
-                    "value": md5(JSON.stringify(_metadata) + process.env.NFT_SECRET)
-                });
+    // _metadata.attributes.push({
+    //                 "trait_type": "SIGNATURE",
+    //                 "value": md5(JSON.stringify(_metadata) + process.env.NFT_SECRET)
+    //             });
 
-    let asset = {   
-      assetName: _metadata.name,
+    // CIP-68 nft
+    let userAsset = {   
+      assetName: '222' + _metadata.name,
       assetQuantity: '1',
       metadata: _metadata,
-      label: '721',
+    //   label: '222',
       recipient: toAddress
-    }
-    console.log("asset", asset);
+    };
+    console.log("user asset", userAsset);
+
+    let referenceAsset = {   
+      assetName: '100' + _metadata.name,
+      assetQuantity: '1',
+      metadata: _metadata,
+    //   label: '100',
+      recipient: adminAddr
+    };
+    console.log("reference asset", referenceAsset);
     
-    const { pubKeyHash: keyHash } = deserializeAddress(await wallet.getChangeAddress());
+    const { pubKeyHash: keyHash } = deserializeAddress(adminAddr);
     console.log("keyHash", keyHash);
 
     const nativeScript = {
       type: "sig",
       keyHash: keyHash
     };
+
+    const policyId = resolveNativeScriptHash(nativeScript);
+    console.log("policyId", policyId);
+    
+    const userAssetNameHex = Buffer.from('222' + _metadata.name, 'utf8').toString('hex');
+    console.log("userAssetNameHex", userAssetNameHex);
+
+    const userAssetUnit = policyId + userAssetNameHex;
+    console.log("userAssetUnit", userAssetUnit);
+
+
     
     const forgingScript = ForgeScript.fromNativeScript(nativeScript);
 
-    const tx = new Transaction({ initiator: wallet });
-    console.log("tx", tx);
+    const userTx = new Transaction({ initiator: wallet });
+    console.log("tx", userTx);
     
-    tx.mintAsset(
+    userTx.mintAsset(
       forgingScript,
-      asset,
+      userAsset,
     );
 
-    const unsignedTx = await tx.build();
+    // userTx.sendAssets(toAddress, [
+    //     { unit: `${policyId}222${assetNameHex}`, quantity: '1' }
+    // ]);
+
+    const unsignedTx = await userTx.build();
     console.log("unsignedTx", unsignedTx);
     
     const signedTx = await wallet.signTx(unsignedTx);
@@ -220,23 +250,121 @@ async function MintNFT(toAddress, metadata, isTest) {
     const response = await waitForTx(txHash, isTest)
     console.log("response", response);
 
-    const policyId = resolveNativeScriptHash(nativeScript);
-    console.log("policyId", policyId);
     
-    const assetNameHex = Buffer.from(_metadata.name, 'utf8').toString('hex');
-    console.log("assetNameHex", assetNameHex);
 
-    const unit = policyId + assetNameHex;
-    console.log("unit", unit);
+
+    // mint reference asset
+    const referenceTx = new Transaction({ initiator: wallet });
+    console.log("reference tx", referenceTx);
+    referenceTx.mintAsset(
+        forgingScript,
+        referenceAsset,
+    );
+    // referenceTx.sendAssets(adminAddr, [
+    //     { unit: `${policyId}100${assetNameHex}`, quantity: '1' }
+    // ]);
+    const referenceUnsignedTx = await referenceTx.build();
+    console.log("reference unsignedTx", referenceUnsignedTx);
+    const referenceSignedTx = await wallet.signTx(referenceUnsignedTx);
+    console.log("reference signedTx", referenceSignedTx);
+    const referenceTxHash = await wallet.submitTx(referenceSignedTx);
+    console.log("reference txHash", referenceTxHash);
+    const referenceResponse = await waitForTx(referenceTxHash, isTest);
+    console.log("reference response", referenceResponse);
     
+    const referenceAssetNameHex = Buffer.from('100' + _metadata.name, 'utf8').toString('hex');
+    console.log("referenceAssetNameHex", referenceAssetNameHex);
+
+    const referenceAssetUnit = policyId + referenceAssetNameHex;
+    console.log("referenceAssetUnit", referenceAssetUnit);
+
     return {
         response: response,
         transactionHash: txHash,
         policyId: policyId,
-        assetNameHex: assetNameHex,
-        unit: unit,
+        assetNameHex: userAssetNameHex,
+        unit: userAssetUnit,
+        referenceTxHash: referenceTxHash,
+        referenceAssetUnit: referenceAssetUnit
     };
 }
+
+// async function MintNFT(toAddress, metadata, isTest) {
+//     let _metadata = metadata;
+//     let wallet = isTest ? adminCardanoWalletTest : adminCardanoWallet;
+
+//     if(typeof _metadata !== 'object') {
+//         _metadata = JSON.parse(_metadata);
+//     }
+
+//     if(!_metadata.name || !_metadata.name.trim()) {
+//         throw new Error("Metadata name is required");
+//     }
+
+//     if(!_metadata.attributes) {
+//         _metadata.attributes = [];
+//     }
+//     _metadata.attributes.push({
+//                     "trait_type": "SIGNATURE",
+//                     "value": md5(JSON.stringify(_metadata) + process.env.NFT_SECRET)
+//                 });
+
+//     let asset = {   
+//       assetName: _metadata.name,
+//       assetQuantity: '1',
+//       metadata: _metadata,
+//       label: '721',
+//       recipient: toAddress
+//     }
+//     console.log("asset", asset);
+    
+//     const { pubKeyHash: keyHash } = deserializeAddress(await wallet.getChangeAddress());
+//     console.log("keyHash", keyHash);
+
+//     const nativeScript = {
+//       type: "sig",
+//       keyHash: keyHash
+//     };
+    
+//     const forgingScript = ForgeScript.fromNativeScript(nativeScript);
+
+//     const tx = new Transaction({ initiator: wallet });
+//     console.log("tx", tx);
+    
+//     tx.mintAsset(
+//       forgingScript,
+//       asset,
+//     );
+
+//     const unsignedTx = await tx.build();
+//     console.log("unsignedTx", unsignedTx);
+    
+//     const signedTx = await wallet.signTx(unsignedTx);
+//     console.log("signedTx", signedTx);
+    
+//     const txHash = await wallet.submitTx(signedTx);    
+//     console.log("txHash", txHash);
+    
+//     const response = await waitForTx(txHash, isTest)
+//     console.log("response", response);
+
+//     const policyId = resolveNativeScriptHash(nativeScript);
+//     console.log("policyId", policyId);
+    
+//     const assetNameHex = Buffer.from(_metadata.name, 'utf8').toString('hex');
+//     console.log("assetNameHex", assetNameHex);
+
+//     const unit = policyId + assetNameHex;
+//     console.log("unit", unit);
+    
+//     return {
+//         response: response,
+//         transactionHash: txHash,
+//         policyId: policyId,
+//         assetNameHex: assetNameHex,
+//         unit: unit,
+//     };
+// }
 
 async function BurnNFT(unit, isTest) {
     let wallet = isTest ? adminCardanoWalletTest : adminCardanoWallet;
